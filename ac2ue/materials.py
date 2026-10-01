@@ -124,7 +124,9 @@ def convert_material(mat, texture_lookup) -> dict:
     # shells at 0.19 are meant to be half as bright as the asphalt at 0.42).
     ks_diffuse = _prop(mat, "ksDiffuse")
     if ks_diffuse is not None and ks_diffuse.a > 0:
-        f = round(min(max(ks_diffuse.a / DIFFUSE_REFERENCE, 0.3), 1.5), 4)
+        # AC shades in gamma space; a gamma-space scale f is f^2.2 in linear.
+        f = min(max(ks_diffuse.a / DIFFUSE_REFERENCE, 0.3), 1.5)
+        f = round(f ** 2.2, 4)
         vectors["Tint"] = [f, f, f, 1.0]
 
     alpha_ref = _a(mat, "ksAlphaRef", 0.0)

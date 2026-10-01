@@ -186,7 +186,19 @@ class _AssetTools:
             dest, name = t._props["destination_path"], t._props["destination_name"]
             ext = os.path.splitext(fn)[1].lower()
             out = []
-            if ext == ".glb":
+            if ext == ".glb" and _glb_json(fn).get("skins"):
+                g = _glb_json(fn)
+                skel = _register(f"{dest}/{name}_Skeleton", Skeleton(name + "_Skeleton"))
+                bones = {n["name"]: np.array(n.get("translation", [0, 0, 0])) @ IMPORT_M.T
+                         for n in g["nodes"] if "mesh" not in n}
+                pa = _register(f"{dest}/{name}_PhysicsAsset", PhysicsAsset(name + "_PhysicsAsset", list(bones)))
+                skm = _register(f"{dest}/{name}", SkeletalMesh(name, f"{dest}/{name}",
+                                                               [m["name"] for m in g["materials"]], skel, pa, bones))
+                out += [f"{dest}/{name}.{name}", f"{dest}/{name}_Skeleton.x", f"{dest}/{name}_PhysicsAsset.x"]
+                for m in g["materials"]:
+                    _register(f"{dest}/{m['name']}_imported", Material(m["name"]))
+                    out.append(f"{dest}/{m['name']}_imported.x")
+            elif ext == ".glb":
                 verts = _read_glb_positions(fn) @ IMPORT_M.T
                 mesh = _register(f"{dest}/{name}", StaticMesh(name, f"{dest}/{name}", verts))
                 out.append(f"{dest}/{name}.{name}")
@@ -358,3 +370,144 @@ def log_error(m): print("ERROR", m)
 class EditorStaticMeshLibrary:
     @staticmethod
     def remove_collisions(m): pass
+
+
+
+# ---------------------------------------------------------------- car support
+
+def _glb_json(path):
+    with open(path, "rb") as f:
+        d = f.read()
+    jl = struct.unpack_from("<I", d, 12)[0]
+    return json.loads(d[20:20 + jl])
+
+
+class Skeleton(Object): pass
+class AnimBlueprint(Object): pass
+class Blueprint(Object): pass
+class WheeledVehiclePawn(Object): pass
+class ChaosVehicleWheel(Object): pass
+class VehicleAnimationInstance(Object): pass
+class BlueprintFactory(Object): pass
+class AnimBlueprintFactory(Object): pass
+
+for _e in ("PhysicsType", "BodyCollisionResponse", "AxleType", "VehicleDifferential", "AnimationMode"):
+    globals()[_e] = _Enum(_e)
+
+
+class Struct(Object):
+    def __init__(self, **kw):
+        super().__init__(type(self).__name__)
+        self._props.update(kw)
+
+
+class ChaosWheelSetup(Struct): pass
+class KBoxElem(Struct): pass
+class RichCurveKey(Struct): pass
+
+
+class SkeletalMaterial(Struct): pass
+
+
+class SkeletalMesh(Object):
+    def __init__(self, name, path, slots, skel, pa, bones):
+        super().__init__(name, path)
+        self._props["materials"] = [SkeletalMaterial(material_slot_name=s) for s in slots]
+        self._props["skeleton"] = skel
+        self._props["physics_asset"] = pa
+        self.bones = bones
+
+
+class PhysicsAsset(Object):
+    def __init__(self, name, bones):
+        super().__init__(name)
+        self._props["skeletal_body_setups"] = [Struct(bone_name=b) for b in bones]
+
+
+class _GeneratedClass:
+    def __init__(self, bp):
+        self.bp = bp
+
+
+class _BlueprintAsset(Blueprint):
+    def __init__(self, name, parent):
+        super().__init__(name)
+        self.parent = parent
+        self._props["parent_class"] = parent
+        self.cdo = Object(name + "_CDO")
+        self.cdo._props["mesh"] = Object(name + ".mesh")
+        self.cdo._props["vehicle_movement_component"] = Object(name + ".movement")
+        self.gc = _GeneratedClass(self)
+
+    def generated_class(self):
+        return self.gc
+
+
+def get_default_object(gc):
+    return gc.bp.cdo
+
+
+_orig_create = _AssetTools.create_asset
+
+
+def _create_asset(self, name, folder, cls, factory):
+    pkg = f"{folder}/{name}"
+    if cls in (Blueprint, AnimBlueprint):
+        CALLS.append(("create_asset", pkg, cls.__name__))
+        return _register(pkg, _BlueprintAsset(name, factory._props.get("parent_class")))
+    return _orig_create(self, name, folder, cls, factory)
+
+
+_AssetTools.create_asset = _create_asset
+
+
+def _duplicate(src, dst):
+    _register(dst, _BlueprintAsset(dst.rsplit("/", 1)[-1], VehicleAnimationInstance))
+    return ASSETS[dst]
+
+
+EditorAssetLibrary.duplicate_asset = staticmethod(_duplicate)
+
+
+class BlueprintEditorLibrary:
+    @staticmethod
+    def compile_blueprint(bp):
+        CALLS.append(("compile", bp.get_name()))
+
+    @staticmethod
+    def reparent_blueprint(bp, parent):
+        bp.parent = parent
+        bp._props["parent_class"] = parent
+
+
+class TopLevelAssetPath:
+    def __init__(self, *a): pass
+
+
+class ARFilter:
+    def __init__(self, **kw):
+        self.kw = kw
+
+
+REGISTRY = []  # list of fake AssetData added by tests
+
+
+class _AssetData:
+    def __init__(self, package_name, tags):
+        self.package_name = package_name
+        self.asset_name = package_name.rsplit("/", 1)[-1]
+        self.tags = tags
+
+    def get_tag_value(self, k):
+        return self.tags.get(k)
+
+
+class _Registry:
+    def get_assets(self, flt):
+        return list(REGISTRY)
+
+
+class AssetRegistryHelpers:
+    @staticmethod
+    def get_asset_registry():
+        return _Registry()

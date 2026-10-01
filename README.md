@@ -1,6 +1,6 @@
-# KN5 to Unreal
+# KN5 to Unreal V2
 
-Converts an Assetto Corsa track (a `content/tracks/<name>` folder or a single `.kn5`) into an Unreal Engine 5 project: static meshes, textures, materials, physics surfaces with collision, and one level per track layout.
+Converts Assetto Corsa tracks and cars into Unreal Engine 5. Tracks become static meshes, materials, physics surfaces with collision, and one level per layout. Cars become drivable Chaos vehicles with every livery (see [Cars](#cars)).
 
 It works in two steps:
 
@@ -93,6 +93,29 @@ AC shaders are mapped onto four master materials. The mapping is an approximatio
 | ksMultilayer* | Multilayer | txDiffuse × (txDetailR/G/B/A weighted by txMask, normalised). Details are projected from world position, tiling `multX` times per metre, as in AC. Object-space variants (`_objsp`) and layers with zero tiling use the layer's average colour |
 
 Roughness comes from `ksSpecularEXP` with `ksSpecular` folded in (0 means fully matte, as in AC). Road shaders use `tarmacSpecularMultiplier` where `fresnelMaxLevel` asks for a sheen. Emissive comes from `ksEmissive`. Each material's `ksDiffuse` becomes its Tint (relative to 0.4), so relative brightness matches AC. AC's spawn and timing markers (`AC_START_*`, `AC_PIT_*`, `AC_TIME_*`…) are hidden; `AC_POBJECT*` props stay visible. Master materials are versioned and rebuilt in place automatically when the script updates them. Every value can be edited on the material instances (Roughness, Specular, Tint, EmissiveColor, DetailTiling and so on). The original AC values are kept in `manifest.json` under `ac_properties`.
+
+## Cars
+
+Point the converter (or the desktop app) at a car folder such as `content/cars/ks_mazda_mx5_nd`. Car folders are detected automatically, and `--car` forces it. The Unreal command is the same `py ".../ue_import_track.py" ".../manifest.json"`, and the script recognises a car manifest.
+
+**Before importing a car**, enable the **Chaos Vehicles** plugin. For a car you can drive straight away, also add the Vehicle template content to your project: Content Browser > **Add** > **Add Feature or Content Pack** > **Vehicle**. The script derives your car from that template's pawn, which gives it keyboard and gamepad input, a chase camera, and the wheel animation Blueprint. Python can't author those parts itself. Without the template the car is still built completely, and the Output Log tells you what's missing. Adding the template later and re-running with `--reuse-existing` upgrades the car in place.
+
+What gets built under `/Game/ACTracks/Cars/<car>/`:
+
+| Asset | What it is |
+|---|---|
+| `SK_<car>` | One skeletal mesh with a `root` bone plus `WHEEL_LF/RF/LR/RR`. Rims and tyres are skinned to their wheel, everything else to the root. It faces +X, as Chaos expects |
+| Physics asset | Root body is a box from the car's `collider.kn5` (or its bounds); wheel bodies are kinematic with collision off, since Chaos raycasts the wheels |
+| `BP_<car>_WheelFront/Rear` | Chaos wheel classes: radius and width from `tyres.ini` (or measured from the mesh), steering lock from `car.ini`, driven wheels from the drivetrain |
+| `ABP_<car>` | Wheel animation (copied from the Vehicle template) |
+| `BP_<car>` | The drivable vehicle: mass, torque curve (`power.lut`), rev limit, gears, final drive and FWD/RWD/AWD from `data/` |
+| `BP_<car>_<skin>` | One child Blueprint per extra livery, overriding only the materials that livery changes |
+
+Details:
+- **Liveries:** the first `skins/` folder is the default, as in AC. Skin textures replace KN5 textures by file name, case-insensitively. On many cars the paint is a flat `txDetail` colour, and that's handled.
+- **Runtime variants:** motion-blur rims (`*_BLUR*`), crash damage (`*DAMAGE*`) and low-res twins (`COCKPIT_LR` when `COCKPIT_HR` exists) are skipped.
+- **Physics:** values come from the car's readable `data/` folder. Kunos cars pack theirs in `data.acd`, which this tool doesn't unpack. For those, the physics are estimates (1300 kg, 400 Nm, six gears, RWD), and the wheel size is measured from the mesh. Tune them on `BP_<car>`. Suspension uses Chaos's defaults in every case, because AC's suspension geometry doesn't map onto Chaos's model.
+- **Doesn't move:** the steering wheel, doors and other animated parts stay fixed to the body. Only the wheels spin and steer.
 
 ## Limitations
 

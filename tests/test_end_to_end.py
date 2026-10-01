@@ -86,7 +86,7 @@ def main():
         master = F.ASSETS["/Game/ACTracks/_Shared/Masters/M_AC_Opaque"]
         assert master._props["meta:AC2UE_MASTER_VERSION"] == ue.MASTER_VERSION
         g = F.ASSETS["/Game/ACTracks/test_ring/Materials/test_ring/MI_bbgrass"]
-        assert g._props["scalar:Dither"] == 1.0 and abs(g._props["vector:Tint"].rgba[0] - 0.475) < 1e-3
+        assert g._props["scalar:Dither"] == 1.0 and abs(g._props["vector:Tint"].rgba[0] - 0.475 ** 2.2) < 1e-3
         actors = {a.label: a for a in levels["L_test_ring_gp"] if isinstance(a.obj, F.StaticMesh)}
         marker = actors["AC_START_0"]
         assert marker.get_editor_property("static_mesh_component")._props.get("visible") is False

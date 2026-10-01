@@ -25,7 +25,9 @@ What it builds:
 import argparse
 import json
 import os
+import re
 import sys
+import types
 
 import unreal
 
@@ -45,6 +47,10 @@ def log(msg):
 
 def warn(msg):
     unreal.log_warning("[AC2UE] " + msg)
+
+
+def safe_name(text):
+    return re.sub(r"_+", "_", re.sub(r"[^A-Za-z0-9_]+", "_", text)).strip("_")[:60] or "unnamed"
 
 
 def subsystem(cls_name):
@@ -214,7 +220,7 @@ MASTER_PARAMS = {
 
 # Bump when the master graphs change; existing masters are then rebuilt in
 # place (same asset, so material instances keep pointing at them).
-MASTER_VERSION = "3"
+MASTER_VERSION = "4"
 DITHER_FUNCTION_PATHS = (
     "/Engine/Functions/Engine_MaterialFunctions02/Utility/DitherTemporalAA",
     "/Engine/Functions/Engine_MaterialFunctions02/DitherTemporalAA",
@@ -376,15 +382,12 @@ def build_master(kind, folder, defaults, rebuild):
     else:
         duv = g.mul(uv, "", g.scalar("DetailTiling", 1.0), "")
         detail = g.tex("Detail", white, ST.SAMPLERTYPE_COLOR, duv)
-        # AC detail maps are neutral at mid-grey: they enter as detail * 2.
-        detail2 = g.node(unreal.MaterialExpressionMultiply, -400, const_b=2.0)
+        # AC detail maps are neutral at mid-grey and enter as detail * 2 in
+        # GAMMA space; in linear that is detail * 2^2.2 (clamped). On many cars
+        # this flat detail colour is the paint.
+        detail2 = g.node(unreal.MaterialExpressionMultiply, -400, const_b=4.595)
         g.link(detail, "RGB", detail2, "A")
-        if kind == "Opaque":
-            # AC multimap: detail shows where the diffuse alpha is dark.
-            dmask = g.lerp(detail2, "", None, None, diffuse, "A", const_b=1.0)
-            dmask_out = ""
-        else:
-            dmask, dmask_out = detail2, ""
+        dmask, dmask_out = g.saturate(detail2), ""
         factor = g.lerp(None, None, dmask, dmask_out, g.scalar("UseDetail", 0.0), "", const_a=1.0)
         base = g.mul(diffuse, "RGB", factor, "")
 
@@ -727,12 +730,21 @@ def main(argv):
     p.add_argument("--no-lighting", action="store_true")
     p.add_argument("--reuse-existing", action="store_true")
     p.add_argument("--rebuild-masters", action="store_true")
+    p.add_argument("--vehicle-base", help="cars: Blueprint to derive the vehicle from "
+                                          "(default: the Vehicle template's pawn, if present)")
     args = p.parse_args(argv)
 
     manifest_path = os.path.abspath(args.manifest)
     manifest_dir = os.path.dirname(manifest_path)
     with open(manifest_path, "r", encoding="utf-8") as f:
         manifest = json.load(f)
+    if manifest.get("format") == "ac2ue-car-manifest":
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import ac2ue_car  # noqa: E402
+        # Pass this script's own namespace: Unreal's `py` command runs the file
+        # in a namespace that is not sys.modules["__main__"].
+        ac2ue_car.run(manifest, manifest_dir, args, types.SimpleNamespace(**globals()))
+        return
     if manifest.get("format") != "ac2ue-manifest":
         raise RuntimeError("not an ac2ue manifest: " + manifest_path)
 

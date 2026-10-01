@@ -131,7 +131,11 @@ class Kn5File:
             active = parent_active and node.active
             world = parent_world
             if node.node_class == 1 and node.matrix is not None:
-                world = node.matrix.astype(np.float64) @ parent_world
+                m = node.matrix.astype(np.float64)
+                # Some real files carry dummies with all-NaN matrices; AC
+                # treats them as identity in practice.
+                if np.isfinite(m).all():
+                    world = m @ parent_world
             node_path = path + (node.name,)
             yield node, world, node_path, active
             for child in reversed(node.children):

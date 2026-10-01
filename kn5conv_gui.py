@@ -12,6 +12,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 from ac2ue.convert import convert  # noqa: E402
+from ac2ue.car import convert_car, is_car_folder  # noqa: E402
 
 UE_SCRIPT = os.path.join(HERE, "unreal", "ue_import_track.py").replace("\\", "/")
 
@@ -55,7 +56,7 @@ class App(tk.Tk):
             for text, cmd in buttons:
                 ttk.Button(bf, text=text, command=cmd).pack(side="left", padx=2)
 
-        row(0, "Track folder or .kn5", self.var_in,
+        row(0, "Track/car folder or .kn5", self.var_in,
             [("Folder…", self.pick_in_dir), ("KN5…", self.pick_in_file)])
         row(1, "Output folder", self.var_out, [("Browse…", self.pick_out)])
         row(2, "AC install (optional)", self.var_ac, [("Browse…", self.pick_ac)])
@@ -80,7 +81,7 @@ class App(tk.Tk):
         self.after(100, self.drain)
 
     def pick_in_dir(self):
-        d = filedialog.askdirectory(title="AC track folder (content/tracks/<name>)")
+        d = filedialog.askdirectory(title="AC track or car folder (content/tracks|cars/<name>)")
         if d:
             self.var_in.set(d)
             if not self.var_out.get():
@@ -117,9 +118,13 @@ class App(tk.Tk):
 
         def work():
             try:
-                self.manifest = convert(src, out, self.var_ac.get().strip() or None, layouts,
-                                        self.var_inactive.get(), os.cpu_count() or 4,
-                                        False, _QueueStream(self.q))
+                if is_car_folder(src):
+                    self.manifest = convert_car(src, out, "all", os.cpu_count() or 4,
+                                                False, _QueueStream(self.q))
+                else:
+                    self.manifest = convert(src, out, self.var_ac.get().strip() or None, layouts,
+                                            self.var_inactive.get(), os.cpu_count() or 4,
+                                            False, _QueueStream(self.q))
                 self.q.put(("done", None))
             except Exception as e:  # noqa: BLE001
                 self.q.put(("error", str(e)))
